@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "npx hardhat compile",
+    "deploy": "npx hardhat run scripts/deploy.ts --network", 
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

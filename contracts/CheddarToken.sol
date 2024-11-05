@@ -5,15 +5,24 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract CheddarToken is ERC20, ERC20Burnable, Ownable(msg.sender) {
+contract CheddarToken is ERC20, ERC20Burnable, Ownable {
 
-    mapping(address => bool) public mintersMap;
+    mapping(address => bool) private mintersMap;
+
+    event Mint(address indexed to, uint256 amount);
+    event AddMinter(address indexed minter);
+    event RemoveMinter(address indexed minter);
 
     constructor(
-        string memory name,
+        string memory _name,
         address _minter
-    ) ERC20(name, "Cheddar") {
-        mintersMap[_minter] = true;
+    ) ERC20(_name, "Cheddar") Ownable(msg.sender) {
+        addMinter(_minter);
+    }
+
+    modifier onlyMinter() {
+        require(isMinter(msg.sender), "Caller is not a _minter");
+        _;
     }
 
     function decimals() public pure override returns (uint8) {
@@ -21,23 +30,24 @@ contract CheddarToken is ERC20, ERC20Burnable, Ownable(msg.sender) {
     }
 
     function mint(
-        address recipient,
-        uint256 amount
-    ) public returns (bool) {
-        require(mintersMap[msg.sender], "Caller is not a minter");
-        _mint(recipient, amount);
-        return true;
+        address _recipient,
+        uint256 _amount
+    ) external onlyMinter {
+        _mint(_recipient, _amount);
+        emit Mint(_recipient, _amount);
     }
 
-    function addMinter(address newMinter) public onlyOwner {
-        mintersMap[newMinter] = true;
+    function addMinter(address _newMinter) public onlyOwner {
+        mintersMap[_newMinter] = true;
+        emit AddMinter(_newMinter);
     }
 
-    function removeMinter(address minter) public onlyOwner {
-        delete mintersMap[minter];
+    function removeMinter(address _minter) external onlyOwner {
+        delete mintersMap[_minter];
+        emit RemoveMinter(_minter);
     }
 
-    function isMinter(address addr) public view returns (bool) {
-        return mintersMap[addr];
+    function isMinter(address _addr) public view returns (bool) {
+        return mintersMap[_addr];
     }
 }

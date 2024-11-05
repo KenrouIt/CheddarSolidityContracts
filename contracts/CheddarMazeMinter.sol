@@ -5,15 +5,13 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./CheddarToken.sol";
 
-contract CheddarMazeMinter is Ownable(msg.sender) {
-    event mintAmountEvent(uint256 mintAmount);
-
+contract CheddarMazeMinter is Ownable {
     address public minter;
     address public cheddarToken;
     bool public active = true;
 
-    uint256 public dailyQuota = 10000 * 10 ** 24; // Default daily quota set to 10000 tokens, adjusted for decimals
-    uint256 public userQuota = 555 * 10 ** 24;
+    uint256 public dailyQuota;
+    uint256 public userQuota;
 
     mapping(address => uint256) public userLastMintDay;
     mapping(address => uint256) public userDailyMinted;
@@ -21,58 +19,83 @@ contract CheddarMazeMinter is Ownable(msg.sender) {
     uint256 public todayMinted;
     uint256 public currentDay;
 
-    uint256 private constant DAY_IN_SECONDS = 86400;
+    event Mint(uint256 mintAmount);
 
-    constructor(address _cheddarToken, address _minter) {
-        cheddarToken = _cheddarToken;
-        minter = _minter;
-        currentDay = block.timestamp / DAY_IN_SECONDS;
+    constructor(address _cheddarToken, address _minter) Ownable(msg.sender) {
+        setCheddarToken(_cheddarToken);
+        setMinter(_minter);
+        uint8 decimals = CheddarToken(_cheddarToken).decimals();
+        setDailyQuota(10000 * 10 ** decimals); // Default daily quota set to 10000 tokens, adjusted for decimals
+        setUserQuota(555 * 10 ** decimals);
     }
 
-    function mint(
-        address recipient,
-        uint256 amount,
-        address referral
-    ) public returns (uint256, uint256) {
+    modifier onlyMinter() {
         require(msg.sender == minter, "Caller is not the minter");
+        _;
+    }
+
+    modifier isActivated() {
         require(active, "Contract is deactivated");
-        uint256 today = block.timestamp / DAY_IN_SECONDS;
+        _;
+    }
+
+    function _processReferral(address _referral, uint256 _amount) private returns (uint256) {
+        if (_referral != address(0)) {
+            uint256 referralAmount = _amount / 20;
+
+            CheddarToken(cheddarToken).mint(
+                _referral,
+                referralAmount
+            );
+
+            return referralAmount;
+        }
+        return 0;
+    }
+
+    function _updateState(address _recipient) private {
+        uint256 today = block.timestamp / 1 days;
         if (today != currentDay) {
             todayMinted = 0;
             currentDay = today;
         }
 
-        uint256 referralAmount = referral != address(0) ? amount / 20 : 0;
-        if (referral != address(0)) {
-            bool isReferralSuccessfull = CheddarToken(cheddarToken).mint(
-                referral,
-                referralAmount
-            );
-            require(isReferralSuccessfull, "Referral minting failed");
+        if (userLastMintDay[_recipient] != today) {
+            userDailyMinted[_recipient] = 0;
         }
+    }
 
-        if (userLastMintDay[recipient] != today) {
-            userDailyMinted[recipient] = 0;
-        }
+    function mint(
+        address _recipient,
+        uint256 _amount,
+        address _referral
+    ) public isActivated onlyMinter returns (uint256, uint256) {
+        _updateState(_recipient);
 
-        uint256 userTodayMinted = userDailyMinted[recipient];
-        uint256 userAmount = amount - referralAmount;
-        uint256 mintAmount = Math.min(
-            Math.min(userAmount, dailyQuota - todayMinted),
-            userQuota - userTodayMinted
-        );
-        emit mintAmountEvent(mintAmount);
-        todayMinted = todayMinted + mintAmount;
+        uint256 referralAmount = _processReferral(_referral, _amount);
+
+        uint256 userTodayMinted = userDailyMinted[_recipient];
+
         if (userTodayMinted >= userQuota) {
-            return (0, referralAmount); // User has reached their quota, no minting for the user but referral processed.
+            return (0, referralAmount); // User has reached their quota, no minting for the user but _referral processed.
         }
 
-        userDailyMinted[recipient] += mintAmount;
-        bool isUserSuccessfull = CheddarToken(cheddarToken).mint(
-            recipient,
+        uint256 userAmount = _amount - referralAmount;
+        uint256 dailyQuotaRemaining = dailyQuota - todayMinted;
+        uint256 userQuotaRemaining = userQuota - userTodayMinted;
+        uint256 mintAmount = Math.min(
+            Math.min(userAmount, dailyQuotaRemaining),
+            userQuotaRemaining
+        );
+
+        CheddarToken(cheddarToken).mint(
+            _recipient,
             mintAmount
         );
-        require(isUserSuccessfull, "User minting failed");
+        userDailyMinted[_recipient] += mintAmount;
+        todayMinted += mintAmount;
+
+        emit Mint(mintAmount);
 
         return (mintAmount, referralAmount);
     }
@@ -98,7 +121,7 @@ contract CheddarMazeMinter is Ownable(msg.sender) {
     }
 
     function getTodayMinted() public view returns (uint256) {
-        uint256 today = block.timestamp / DAY_IN_SECONDS;
+        uint256 today = block.timestamp / 1 days;
         if (today != currentDay) {
             return 0;
         }
